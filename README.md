@@ -7,7 +7,7 @@ Clients join different chat room.
 Maintain clients' list and rooms' list.
 
 Edited by Lu
-================
+
 
 Install
 ==================
