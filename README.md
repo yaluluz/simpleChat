@@ -1,12 +1,11 @@
-chat-websocket (socket.io)
+Simple Chatroom
+Contributed by Yalu Zhu
 ===============
 
-a very simple chat demo using websocket. Using socket.io instead of ws modules.
+a very simple chat room using websocket - socket.io instead of ws modules.
 
-Detail
-==================
-
-http://blog.fens.me/nodejs-socketio-chat/
+Clients join different chat room.
+Maintain clients' list and rooms' list.
 
 Install
 ==================
