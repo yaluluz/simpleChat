@@ -1,108 +1,173 @@
-//引入程序包
 var express = require('express')
-  , path = require('path')
-  , app = express()
-  , server = require('http').createServer(app)
-  , io = require('socket.io').listen(server);
+    , path = require('path')
+    , app = express()
+    , server = require('http').createServer(app)
+    , io = require('socket.io').listen(server);
 
-//设置日志级别
-io.set('log level', 1); 
+io.set('log level', 1);
 
-//WebSocket连接监听
+var users = {};
+var rooms = {};
+rooms['foo'] = {};
+rooms['bar'] = {};
+
+
+
+//listen to WebSocket connection
 io.on('connection', function (socket) {
-  socket.emit('open');//通知客户端已连接
+    //send confirmation to client
+    socket.emit('open');
 
-  // 打印握手信息
-  // console.log(socket.handshake);
 
-  // 构造客户端对象
-  var client = {
-    socket:socket,
-    name:false,
-    color:getColor()
-  }
-  
-  // 对message事件的监听
-  socket.on('message', function(msg){
-    var obj = {time:getTime(),color:client.color};
+    var client = {
+        socket:socket,
+        name:false,
+        room:false,
+        color:getColor()
+    };
 
-    // 判断是不是第一次连接，以第一条消息作为用户名
-    if(!client.name){
-        client.name = msg;
-        obj['text']=client.name;
-        obj['author']='System';
-        obj['type']='welcome';
-        console.log(client.name + ' login');
+    //Listen to event 'message'
+    socket.on('message', function (msg){
+        var obj = {time:getTime(),color:client.color};
 
-        //返回欢迎语
-        socket.emit('system',obj);
-        //广播新用户已登陆
-        socket.broadcast.emit('system',obj);
-     }else{
+        //client.name = false -> first time login
+        if (!client.name) {
 
-        //如果不是第一次的连接，正常的聊天消息
-        obj['text']=msg;
-        obj['author']=client.name;      
-        obj['type']='message';
-        console.log(client.name + ' say: ' + msg);
+            if (users[msg]) {
+                obj['author'] = 'System';
+                obj['text'] = 'Name Taken';
+                obj['type'] = 'error';
+                console.log('Existing name');
 
-        // 返回消息（可以省略）
-        socket.emit('message',obj);
-        // 广播向其他用户发消息
-        socket.broadcast.emit('message',obj);
-      }
+                socket.emit('system', obj);
+            } else {
+                client.name = msg;
+                obj['text'] = client.name;
+                obj['author'] = 'System';
+                obj['type'] = 'welcomeClient';
+                obj['rooms'] = rooms;
+                users[msg] = msg;
+                console.log(client.name + ' login');
+
+                socket.emit('system', obj);
+            }
+
+        } else if (!client.room) {
+            //Need to choose a chat room
+
+            if (rooms[msg]) {
+                client.room = msg;
+                rooms[client.room][client.name] = client.name;
+
+                obj['author'] = 'System';
+                obj['text'] = client.name;
+                obj['type'] = 'welcomeRoom';
+                obj['roomName'] = client.room;
+                obj['list'] = rooms[client.room];
+
+                socket.emit('system', obj);
+                socket.join(client.room);
+                socket.broadcast.to(client.room).emit('system',obj);
+                console.log('Enter Room:' + client.name);
+
+            } else {
+                //Wrong room name input
+                obj['author'] = 'System';
+                obj['text'] = 'No this room.';
+                obj['type'] = 'error';
+                console.log('Wrong room');
+
+                socket.emit('system', obj);
+            }
+
+        } else if (msg == 'exitRoom') {
+            //Exit the chat room
+            obj['text'] = client.name;
+            obj['author'] = 'System';
+            obj['type'] = 'disconnect';
+            socket.broadcast.to(client.room).emit('system',obj);
+            socket.leave(client.room);
+            console.log(client.name + ' exit room');
+
+            //Choose room again
+            obj['type'] = 'welcomeClient';
+            obj['rooms'] = rooms;
+
+            delete rooms[client.room][client.name];
+            client.room = false;
+            socket.emit('system', obj);
+
+        } else {
+            //Normal chatting -> send content
+            obj['text']=msg;
+            obj['author']=client.name;
+            obj['type']='message';
+            console.log(client.name + ' say: ' + msg);
+
+            socket.emit('message',obj);
+            socket.broadcast.to(client.room).emit('message',obj);
+        }
     });
 
-    //监听出退事件
-    socket.on('disconnect', function () {  
-      var obj = {
-        time:getTime(),
-        color:client.color,
-        author:'System',
-        text:client.name,
-        type:'disconnect'
-      };
+    //Listen to event 'disconnect' - totally offline
+    socket.on('disconnect', function () {
 
-      // 广播用户已退出
-      socket.broadcast.emit('system',obj);
-      console.log(client.name + 'Disconnect');
+        if (client.room) {
+            obj = {
+                text:client.name,
+                author:'System',
+                type:'disconnect',
+                time:getTime(),
+                color:client.color
+            }
+            socket.leave(client.room);
+            socket.broadcast.to(client.room).emit('system',obj);
+            console.log(client.name + ' exit room');
+            delete rooms[client.room][client.name];
+        }
+        if (users[client.name]) {
+            delete users[client.name];
+        }
+
+        console.log(client.name + 'Disconnect');
     });
-  
+
 });
 
-//express基本配置
+//express configure
 app.configure(function(){
-  app.set('port', process.env.PORT || 3000);
-  app.set('views', __dirname + '/views');
-  app.use(express.favicon());
-  app.use(express.logger('dev'));
-  app.use(express.bodyParser());
-  app.use(express.methodOverride());
-  app.use(app.router);
-  app.use(express.static(path.join(__dirname, 'public')));
+    app.set('port', process.env.PORT || 3000);
+    app.set('views', __dirname + '/views');
+    app.use(express.favicon());
+    app.use(express.logger('dev'));
+    app.use(express.bodyParser());
+    app.use(express.methodOverride());
+    app.use(app.router);
+    app.use(express.static(path.join(__dirname, 'public')));
 });
 
 app.configure('development', function(){
-  app.use(express.errorHandler());
+    app.use(express.errorHandler());
 });
 
-// 指定webscoket的客户端的html文件
+//Websocket client -> html file
 app.get('/', function(req, res){
-  res.sendfile('views/chat.html');
+    res.sendfile('views/chat.html');
 });
 
 server.listen(app.get('port'), function(){
-  console.log("Express server listening on port " + app.get('port'));
+    console.log("Express server listening on port " + app.get('port'));
 });
 
 
 var getTime=function(){
-  var date = new Date();
-  return date.getHours()+":"+date.getMinutes()+":"+date.getSeconds();
+    var date = new Date();
+    return date.getHours()+":"+date.getMinutes()+":"+date.getSeconds();
 }
 
 var getColor=function(){
-  var colors = ['aliceblue','antiquewhite','aqua','aquamarine','pink','red','green',
-                'orange','blue','blueviolet','brown','burlywood','cadetblue'];
-  return colors[Math.round(Math.random() * 10000 % colors.length)];
+    var colors = ['aqua','aquamarine','green','orange', 'DarkMagenta',
+        'blueviolet','brown','burlywood','cadetblue','chocolate','DarkCyan','IndianRed',
+        'MediumVioletRed', 'Teal','VioletRed', 'LightCoral', 'FireBrick'];
+    return colors[Math.floor(Math.random() * 10000 % colors.length)];
 }
